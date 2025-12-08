@@ -4,11 +4,14 @@ import os
 from dotenv import load_dotenv
 from azure.storage.blob import generate_blob_sas, BlobSasPermissions
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 load_dotenv()
 
 IUPS = os.getenv('IUPS', '')  # POST
 RAI  = os.getenv('RAI', '')   # GET
+UIA = os.getenv('UIA', '')   # UPDATE
+DIA = os.getenv('DIA', '')   # DELETE
 CONNECTION = os.getenv('AZURE_CONNECTION_STRING')
 CONTAINER = "mediastorage" 
 
@@ -58,6 +61,34 @@ def display_media(rai):
 
     return response.status_code, data
 
+def format_url(url, item_id):
+    safe_id = quote(str(item_id), safe='') 
+    target_url = url.replace("%7Bid%7D", safe_id)
+
+    return target_url
+
+def update_media(uia, document_id, media_file, user_file_name):
+    data = media_file.copy()
+
+    data['fileName'] = user_file_name
+
+    system_keys = [k for k in data.keys() if k.startswith('_')]
+    for k in system_keys:
+        data.pop(k)
+    
+    target_url = format_url(uia, document_id)
+    try:
+        response = requests.put(target_url, json=data)
+        return response.status_code
+    except Exception as e: return str(e)
+
+def delete_media(dia, item_id):
+    target_url = format_url(dia, item_id)
+    try:
+        response = requests.delete(target_url)
+        return response.status_code
+    except Exception as e: return str(e)
+
 def render_upload_section():
     with st.sidebar:
         st.header("Upload")
@@ -75,7 +106,42 @@ def render_upload_section():
                         if status == 200: st.success("Uploaded!")
                         else: st.error(f"Error: {status}")
 
+def render_update_section(document_id, media_file, user_file_name):
+    with st.form(f"edit_{document_id}"):
+        new_user_file_name = st.text_input("New Filename", value=user_file_name)
+        
+        if st.form_submit_button("Update"):
+            response = update_media(UIA, document_id, media_file, new_user_file_name)
+            if response == 200:
+                st.success("Updated!")
+
+                for item in st.session_state.album_data:
+                    if item['id'] == media_file['id']:
+                        item['fileName'] = new_user_file_name
+                        break
+                    
+                st.rerun()
+            else:
+                st.error(f"Failed: {response}")
+
+def render_delete_section(document_id):
+    if st.button("Delete", key=f"delete_{document_id}"):
+        response = delete_media(DIA, document_id)
+        if response == 200:
+            st.success("Deleted!")
+
+            st.session_state.album_data = [
+                    item for item in st.session_state.album_data 
+                    if item.get('id') != document_id
+                ]
+            
+            st.rerun()
+        else:
+            st.error(f"Failed: {response}")
+
 def render_album_tile(media_file):
+    document_id = media_file.get('id')
+
     user_file_name = media_file.get('fileName', 'Unknown')
     stored_file_name = media_file.get('uniqueFileName', '')
 
@@ -90,23 +156,39 @@ def render_album_tile(media_file):
     if secure_url:
         if stored_file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
             st.image(secure_url, width=100)
+
+        elif stored_file_name.lower().endswith(('.mp4', '.mov', '.avi', '.webm')):
+            st.video(secure_url)
         
-    st.divider()
+    with st.expander("Edit"):
+        render_update_section(document_id, media_file, user_file_name)
+        render_delete_section(document_id)
+        
 
 def render_album_section(columns):
     st.header("Album")
+
+    if 'album_data' not in st.session_state:
+        st.session_state.album_data = None
+    
     if st.button("Load"):
         with st.spinner("Loading..."):
             status, data = display_media(RAI)
 
-            if not data:
-                st.info("No media available.")
-            elif status == 200:
-                album_columns = st.columns(columns)
-                for index, media_file in enumerate(data):
-                    with album_columns[index % columns]:
-                        render_album_tile(media_file)
+            if status == 200: st.session_state.album_data = data
             else: st.error(f"Error: {status}")
+
+    if st.session_state.album_data is not None:
+        data = st.session_state.album_data
+        
+        if not data:
+            st.info("No media found.")
+            return
+
+        album_columns = st.columns(columns)
+        for index, media_file in enumerate(data):
+            with album_columns[index % columns]:
+                render_album_tile(media_file)
 
 if __name__ == "__main__":
     st.set_page_config(page_title="Snippet", layout="wide")
