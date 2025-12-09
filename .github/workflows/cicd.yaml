@@ -20,7 +20,7 @@ jobs:
       - name: azure service principal login
         uses: azure/login@v2
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          creds: ${{ secrets.AZURE_SERVICE_PRINCIPAL }}
 
       - name: build, push, tag in azure container registry
         run: |
