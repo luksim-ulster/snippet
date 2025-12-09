@@ -24,9 +24,10 @@ jobs:
 
       - name: build, push, tag in azure container registry
         run: |
-          az acr build --image ${{ secrets.APP }}:${{ github.sha }} --registry ${{ secrets.REGISTRY }} .
-          
-          az acr build --image ${{ secrets.APP }}:latest --registry ${{ secrets.REGISTRY }} .
+          az acr build \
+            --image ${{ secrets.APP }}:${{ github.sha }} \
+            --image ${{ secrets.APP }}:latest \
+            --registry ${{ secrets.REGISTRY }} .
 
       - name: deploy in azure web app
         uses: azure/webapps-deploy@v3
