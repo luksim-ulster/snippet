@@ -106,38 +106,30 @@ def render_upload_section():
                         if status == 200: st.success("Uploaded!")
                         else: st.error(f"Error: {status}")
 
-def render_update_section(document_id, media_file, user_file_name):
-    with st.form(f"edit_{document_id}"):
-        new_user_file_name = st.text_input("New Filename", value=user_file_name)
-        
-        if st.form_submit_button("Update"):
-            response = update_media(UIA, document_id, media_file, new_user_file_name)
-            if response == 200:
-                st.success("Updated!")
+def handle_delete(dia, document_id):
+    response = delete_media(dia, document_id)
+    if response == 200:
+        st.session_state.album_data = [
+            item for item in st.session_state.album_data 
+            if item.get('id') != document_id
+        ]
+        st.toast("Deleted.")
+    else:
+        st.toast(f"Failed: {response}")
 
-                for item in st.session_state.album_data:
-                    if item['id'] == media_file['id']:
-                        item['fileName'] = new_user_file_name
-                        break
-                    
-                st.rerun()
-            else:
-                st.error(f"Failed: {response}")
+def handle_update(uia, document_id, media_file, input_key):
+    new_user_file_name = st.session_state.get(input_key)
 
-def render_delete_section(document_id):
-    if st.button("Delete", key=f"delete_{document_id}"):
-        response = delete_media(DIA, document_id)
+    if new_user_file_name:
+        response = update_media(uia, document_id, media_file, new_user_file_name)
         if response == 200:
-            st.success("Deleted!")
-
-            st.session_state.album_data = [
-                    item for item in st.session_state.album_data 
-                    if item.get('id') != document_id
-                ]
-            
-            st.rerun()
+            for item in st.session_state.album_data:
+                if item['id'] == document_id:
+                    item['fileName'] = new_user_file_name
+                    break
+            st.toast("Updated!")
         else:
-            st.error(f"Failed: {response}")
+            st.toast(f"Failed: {response}")
 
 def render_album_tile(media_file):
     document_id = media_file.get('id')
@@ -161,9 +153,23 @@ def render_album_tile(media_file):
             st.video(secure_url)
         
     with st.expander("Edit"):
-        render_update_section(document_id, media_file, user_file_name)
-        render_delete_section(document_id)
-        
+        with st.form(f"edit_{document_id}"):
+            input_key = f"input_filename_{document_id}"
+            st.text_input("New Filename", value=user_file_name, key=input_key)
+            
+            st.form_submit_button(
+                "Update", 
+                on_click=handle_update,
+                args=(UIA, document_id, media_file, input_key)
+            )
+
+        st.button(
+            "Delete", 
+            key=f"delete_{document_id}",
+            type="primary",
+            on_click=handle_delete,
+            args=(DIA, document_id)
+        )
 
 def render_album_section(columns):
     st.header("Album")
@@ -178,6 +184,8 @@ def render_album_section(columns):
             if status == 200: st.session_state.album_data = data
             else: st.error(f"Error: {status}")
 
+    album_container = st.container()
+
     if st.session_state.album_data is not None:
         data = st.session_state.album_data
         
@@ -185,10 +193,11 @@ def render_album_section(columns):
             st.info("No media found.")
             return
 
-        album_columns = st.columns(columns)
-        for index, media_file in enumerate(data):
-            with album_columns[index % columns]:
-                render_album_tile(media_file)
+        with album_container:
+            album_columns = st.columns(columns)
+            for index, media_file in enumerate(data):
+                with album_columns[index % columns]:
+                    render_album_tile(media_file)
 
 if __name__ == "__main__":
     st.set_page_config(page_title="Snippet", layout="wide")
