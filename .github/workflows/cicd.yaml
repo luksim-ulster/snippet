@@ -10,9 +10,27 @@ permissions:
   contents: read
 
 jobs:
-  build-deploy:
+  detect-changes:
     runs-on: ubuntu-latest
+    outputs:
+      webapp: ${{ steps.filter.outputs.webapp }}
+      worker: ${{ steps.filter.outputs.worker }}
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dorny/paths-filter@v3
+      id: filter
+      with:
+        filters: |
+          webapp:
+            - 'webapp/**'
+          worker:
+            - 'worker/**'
 
+  build-deploy-app:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.webapp == 'true' }}
+    runs-on: ubuntu-latest
+    
     steps:
       - name: checkout codebase
         uses: actions/checkout@v4
@@ -27,10 +45,40 @@ jobs:
           az acr build \
             --image ${{ secrets.APP }}:${{ github.sha }} \
             --image ${{ secrets.APP }}:latest \
-            --registry ${{ secrets.REGISTRY }} .
+            --registry ${{ secrets.REGISTRY }} \
+            webapp/
 
       - name: deploy in azure web app
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ secrets.APP }}
           images: '${{ secrets.REGISTRY }}.azurecr.io/${{ secrets.APP }}:${{ github.sha }}'
+
+  build-deploy-worker:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.worker == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout codebase
+        uses: actions/checkout@v4
+
+      - name: azure service principal login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_SERVICE_PRINCIPAL }}
+
+      - name: build, push, tag in azure container registry
+        run: |
+          az acr build \
+            --image ${{ secrets.WORKER }}:${{ github.sha }} \
+            --image ${{ secrets.WORKER }}:latest \
+            --registry ${{ secrets.REGISTRY }} \
+            worker/
+
+      - name: deploy in azure container app
+        run: |
+          az containerapp update \
+            --name worker \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --image ${{ secrets.REGISTRY }}.azurecr.io/worker:${{ github.sha }}

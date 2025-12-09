@@ -103,7 +103,7 @@ def render_upload_section():
                 if uploaded_file:
                     with st.spinner("Uploading..."):
                         status = upload_media(IUPS, uploaded_file, user_file_name, user_name, user_id)
-                        if status == 200: st.success("Uploaded!")
+                        if status == 202: st.success("Upload Started...")
                         else: st.error(f"Error: {status}")
 
 def handle_delete(dia, document_id):

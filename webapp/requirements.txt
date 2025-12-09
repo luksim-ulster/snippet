@@ -1,5 +1,6 @@
 streamlit
 requests
 azure-storage-blob
+azure-cosmos
 azure-storage-queue
 python-dotenv
