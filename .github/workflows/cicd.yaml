@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - 'feature/**'
 
 permissions:
   id-token: write
@@ -25,10 +26,27 @@ jobs:
             - 'webapp/**'
           worker:
             - 'worker/**'
-
-  build-deploy-app:
+  
+  test-app:
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.webapp == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+      
+      - name: install dependencies
+        run: pip install -r webapp/requirements.txt
+      
+      - name: unit tests
+        run: python -m unittest webapp/test_webapp.py
+
+  build-deploy-app:
+    needs: test-app
+    if: ${{ needs.detect-changes.outputs.webapp == 'true' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     
     steps:
@@ -54,9 +72,26 @@ jobs:
           app-name: ${{ secrets.APP }}
           images: '${{ secrets.REGISTRY }}.azurecr.io/${{ secrets.APP }}:${{ github.sha }}'
 
-  build-deploy-worker:
+  test-worker:
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.worker == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+      
+      - name: install dependencies
+        run: pip install -r worker/requirements.txt
+      
+      - name: unit tests
+        run: python -m unittest worker/test_worker.py
+
+  build-deploy-worker:
+    needs: test-worker
+    if: ${{ needs.detect-changes.outputs.webapp == 'true' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
 
     steps:
