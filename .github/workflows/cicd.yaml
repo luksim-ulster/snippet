@@ -91,7 +91,7 @@ jobs:
 
   build-deploy-worker:
     needs: test-worker
-    if: ${{ needs.detect-changes.outputs.webapp == 'true' && github.ref == 'refs/heads/main' }}
+    if: ${{ needs.detect-changes.outputs.worker == 'true' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
 
     steps:
