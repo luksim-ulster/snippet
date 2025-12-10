@@ -20,6 +20,8 @@ TRANSLATOR_KEY = os.getenv('AZURE_TRANSLATOR_KEY')
 TRANSLATOR_REGION = os.getenv('AZURE_TRANSLATOR_REGION')
 TRANSLATOR_ENDPOINT = "https://api.cognitive.microsofttranslator.com"
 
+# new feature code
+
 def process_upload(job_data):
     try:
         client = CosmosClient(COSMOS_URL, credential=COSMOS_KEY)
