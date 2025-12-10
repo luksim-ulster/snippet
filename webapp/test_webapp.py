@@ -1,5 +1,5 @@
 import unittest
-from webapp import format_url, get_connection_settings
+from webapp.webapp import format_url, get_connection_settings
 
 class TestWebappLogic(unittest.TestCase):
 
