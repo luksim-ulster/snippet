@@ -31,7 +31,9 @@ def process_upload(job_data):
             "userName": job_data['userName'],
             "userID": job_data['userID'],
             "filePath": f"/mediastorage/{job_data['blobName']}",
-            "isPrivate": is_private_bool
+            "isPrivate": is_private_bool,
+            "likes": 0,
+            "comments": []
         }
 
         container.upsert_item(new_document)

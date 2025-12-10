@@ -133,11 +133,44 @@ def format_url(url, item_id):
 
     return target_url
 
-def update_media(uia, document_id, media_file, user_file_name, is_private):
+def update_media_metadata(uia, document_id, media_file, user_file_name, is_private):
     data = media_file.copy()
 
     data['fileName'] = user_file_name
     data['isPrivate'] = is_private
+
+    system_keys = [k for k in data.keys() if k.startswith('_')]
+    for k in system_keys:
+        data.pop(k)
+    
+    target_url = format_url(uia, document_id)
+    try:
+        response = requests.put(target_url, json=data)
+        return response.status_code
+    except Exception as e: return str(e)
+
+def update_media_likes(uia, document_id, media_file, new_likes_count):
+    data = media_file.copy()
+
+    data['likes'] = new_likes_count
+
+    system_keys = [k for k in data.keys() if k.startswith('_')]
+    for k in system_keys:
+        data.pop(k)
+    
+    target_url = format_url(uia, document_id)
+    try:
+        response = requests.put(target_url, json=data)
+        return response.status_code
+    except Exception as e: return str(e)
+
+def update_media_comments(uia, document_id, media_file, new_comment):
+    data = media_file.copy()
+
+    current_comments = data.get('comments', [])
+    data['comments'] = list(current_comments) 
+    
+    data['comments'].append(new_comment)
 
     system_keys = [k for k in data.keys() if k.startswith('_')]
     for k in system_keys:
@@ -192,12 +225,12 @@ def handle_delete(dia, document_id):
     else:
         st.toast(f"Failed: {response}")
 
-def handle_update(uia, document_id, media_file, name_key, privacy_key):
+def handle_update_metadata(uia, document_id, media_file, name_key, privacy_key):
     new_user_file_name = st.session_state.get(name_key)
     new_privacy_status = st.session_state.get(privacy_key)
 
     if new_user_file_name:
-        response = update_media(uia, document_id, media_file, new_user_file_name, new_privacy_status)
+        response = update_media_metadata(uia, document_id, media_file, new_user_file_name, new_privacy_status)
         if response == 200:
             for item in st.session_state.album_data:
                 if item['id'] == document_id:
@@ -210,6 +243,46 @@ def handle_update(uia, document_id, media_file, name_key, privacy_key):
         else:
             st.toast(f"Failed: {response}")
 
+def handle_update_likes(uia, document_id, media_file):
+    current_likes = media_file.get('likes', 0)
+    new_likes = current_likes + 1
+
+    response = update_media_likes(uia, document_id, media_file, new_likes)
+    
+    if response == 200:
+        for item in st.session_state.album_data:
+            if item['id'] == document_id:
+                item['likes'] = new_likes
+                break
+        st.toast("Awarded!")
+    else:
+        st.toast(f"Failed: {response}")
+
+def handle_update_comments(uia, document_id, media_file, input_key, current_user_email):
+    comment_text = st.session_state.get(input_key)
+
+    if comment_text:
+        new_comment = {
+            "user": current_user_email,
+            "text": comment_text,
+            "timestamp": str(datetime.now())
+        }
+
+        response = update_media_comments(uia, document_id, media_file, new_comment)
+        
+        if response == 200:
+            for item in st.session_state.album_data:
+                if item['id'] == document_id:
+                    if 'comments' not in item:
+                        item['comments'] = []
+                    item['comments'].append(new_comment)
+                    break
+            
+            st.session_state[input_key] = "" 
+            st.toast("Posted!")
+        else:
+            st.toast(f"Failed: {response}")
+
 def render_album_tile(media_file, current_user):
     document_id = media_file.get('id')
 
@@ -219,63 +292,102 @@ def render_album_tile(media_file, current_user):
     file_owner_name = media_file.get('userName', '')
     file_owner_id = media_file.get('userID', '')
 
+    is_private = media_file.get('isPrivate', False)
+    likes = media_file.get('likes', 0)
+    comments = media_file.get('comments', [])
+
     secure_url = create_secure_temporary_link(stored_file_name)
     
+    with st.container(border=True):
+        with st.container(height=300, border=None, horizontal_alignment="center", vertical_alignment="center"):
+            if secure_url:
+                if stored_file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    st.image(secure_url, width='content')
 
-    is_private = media_file.get('isPrivate', False)
-    privacy_icon = "🔴 " if is_private else ""
-    st.markdown(f"**{privacy_icon}{user_file_name}**")
-    st.caption(f"Uploaded by: {file_owner_name}")
-    
-    if secure_url:
-        if stored_file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
-            st.image(secure_url, width=100)
+                elif stored_file_name.lower().endswith(('.mp4', '.mov', '.avi', '.webm')):
+                    st.video(secure_url)
 
-        elif stored_file_name.lower().endswith(('.mp4', '.mov', '.avi', '.webm')):
-            st.video(secure_url)
-    
-    if file_owner_id == current_user['id']:
-        is_editing = (st.session_state.edit_id == document_id)
+        if file_owner_id == current_user['id']:
+            is_editing = (st.session_state.edit_id == document_id)
 
-        if is_editing:
-            with st.container(border=True):
-                st.caption("Editing")
+            if is_editing:
+                with st.container(border=True):
+                    st.caption("Editing")
 
-                with st.form(f"edit_{document_id}"):
-                    input_key_filename = f"input_filename_{document_id}"
-                    input_key_privacy = f"input_privacy_{document_id}"
+                    with st.form(f"edit_{document_id}"):
+                        input_key_filename = f"input_filename_{document_id}"
+                        input_key_privacy = f"input_privacy_{document_id}"
 
-                    st.text_input("New Filename", value=user_file_name, key=input_key_filename)
+                        st.text_input("New Filename", value=user_file_name, key=input_key_filename)
 
-                    st.toggle("Private", value=is_private, key=input_key_privacy)
+                        st.toggle("Private", value=is_private, key=input_key_privacy)
+                        
+                        st.form_submit_button(
+                            "Save Changes",
+                            use_container_width=True,
+                            on_click=handle_update_metadata, 
+                            args=(UIA, document_id, media_file, input_key_filename, input_key_privacy)
+                        )
+
+                    column_delete, column_cancel = st.columns(2)
+
+                    with column_delete:
+                        st.button(
+                            "Delete", 
+                            key=f"delete_{document_id}", 
+                            type="primary", 
+                            use_container_width=True,
+                            on_click=handle_delete, 
+                            args=(DIA, document_id)
+                        )
                     
-                    st.form_submit_button(
-                        "Save Changes", 
-                        on_click=handle_update, 
-                        args=(UIA, document_id, media_file, input_key_filename, input_key_privacy)
-                    )
-
-                column_delete, column_cancel = st.columns(2)
-
-                with column_delete:
-                    st.button(
-                        "Delete", 
-                        key=f"delete_{document_id}", 
-                        type="primary", 
-                        on_click=handle_delete, 
-                        args=(DIA, document_id)
-                    )
+                    with column_cancel:
+                        def close_edit():
+                            st.session_state.edit_id = None
+                        
+                        st.button("Cancel", key=f"cancel_{document_id}", use_container_width=True, on_click=close_edit)
+            else:
+                def open_edit():
+                    st.session_state.edit_id = document_id
                 
-                with column_cancel:
-                    def close_edit():
-                        st.session_state.edit_id = None
-                    
-                    st.button("Cancel", key=f"cancel_{document_id}", on_click=close_edit)
-        else:
-            def open_edit():
-                st.session_state.edit_id = document_id
+                st.button("Edit", key=f"edit_{document_id}", use_container_width=True, on_click=open_edit)
+
+        column_info, column_like = st.columns([2, 1])
+        
+        with column_info:
+            privacy_icon = "🔴 " if is_private else ""
+            st.markdown(f"**{privacy_icon}{user_file_name}**")
+            st.caption(f"Uploaded by {file_owner_name}")
+
+        with column_like:
+            st.button(
+                f"⭐️ {likes}", 
+                key=f"like_{document_id}", 
+                on_click=handle_update_likes,
+                use_container_width=True,
+                args=(UIA, document_id, media_file)
+            )
+
+        with st.form(key=f"comment_form_{document_id}", clear_on_submit=True):
+            input_key = f"new_comment_{document_id}"
             
-            st.button("Edit", key=f"edit_{document_id}", on_click=open_edit)
+            st.text_input("Write a comment...", key=input_key, label_visibility="visible")
+            
+            st.form_submit_button(
+                "Post",
+                use_container_width=True,
+                on_click=handle_update_comments,
+                args=(UIA, document_id, media_file, input_key, current_user['email'])
+            )
+
+        with st.container(height=200, border=False):
+            if comments:
+                for comment in comments:
+                    with st.chat_message("user"):
+                        st.write(f"**{comment.get('user', 'anon')}**: {comment.get('text', '')}")
+            else:
+                st.caption("No comments.")
+
 
 def render_album_section(columns, current_user):
     st.header("Album")
@@ -336,5 +448,5 @@ if __name__ == "__main__":
         st.title("Snippet")
         
         render_upload_section(current_user)
-        render_album_section(4, current_user)
+        render_album_section(3, current_user)
 
