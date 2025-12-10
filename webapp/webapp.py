@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from azure.storage.blob import generate_blob_sas, BlobSasPermissions
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
+import uuid
 
 load_dotenv()
 
@@ -194,6 +195,18 @@ def render_upload_section(current_user):
         st.write(f"**{current_user['email']}**")
         if st.button("Logout"):
             logout()
+
+        st.divider()
+
+        languages = {
+            "Original": "Original",
+            "English": "en",
+            "French": "fr",
+            "Japanese": "ja"
+        }
+        
+        selected_language_name = st.selectbox("Language:", options=list(languages.keys()))
+        target_language_code = languages[selected_language_name]
             
         st.divider()
 
@@ -213,6 +226,10 @@ def render_upload_section(current_user):
                         status = upload_media(IUPS, uploaded_file, user_file_name, user_name, user_id, is_private)
                         if status == 202: st.success("Upload Started...")
                         else: st.error(f"Error: {status}")
+        
+        st.divider()
+
+        return target_language_code
 
 def handle_delete(dia, document_id):
     response = delete_media(dia, document_id)
@@ -262,10 +279,14 @@ def handle_update_comments(uia, document_id, media_file, input_key, current_user
     comment_text = st.session_state.get(input_key)
 
     if comment_text:
+        comment_id = str(uuid.uuid4())
+
         new_comment = {
+            "id": comment_id,
             "user": current_user_email,
             "text": comment_text,
-            "timestamp": str(datetime.now())
+            "timestamp": str(datetime.now()),
+            "translations": {}
         }
 
         response = update_media_comments(uia, document_id, media_file, new_comment)
@@ -283,7 +304,45 @@ def handle_update_comments(uia, document_id, media_file, input_key, current_user
         else:
             st.toast(f"Failed: {response}")
 
-def render_album_tile(media_file, current_user):
+def send_translation_request(uia, doc_id, comment_timestamp, target_lang, comment_id=None):
+    payload = {
+        "task": "translate_comment",
+        "docID": doc_id,
+        "commentTimestamp": comment_timestamp,
+        "commentID": comment_id,
+        "targetLang": target_lang
+    }
+    target_url = format_url(uia, "translation_request")
+    
+    try:
+        requests.put(target_url, json=payload)
+        return True
+    except Exception:
+        return False
+
+def handle_batch_translation(missing_items, uia_url, target_lang):
+    if 'requested_ids' not in st.session_state:
+        st.session_state.requested_ids = set()
+    
+    new_requests = []
+    for item in missing_items:
+        unique_id = item.get('id')
+        request_key = f"{item['doc_id']}_{unique_id}_{target_lang}"
+
+        if request_key not in st.session_state.requested_ids:
+            new_requests.append(item)
+            st.session_state.requested_ids.add(request_key)
+
+    if not new_requests:
+        return False
+        
+    for new_request in new_requests:
+        comment_id = new_request.get('id')
+        send_translation_request(uia_url, new_request['doc_id'], new_request['ts'], target_lang, comment_id=comment_id)
+    
+    return True
+
+def render_album_tile(media_file, current_user, selected_lang_code):
     document_id = media_file.get('id')
 
     user_file_name = media_file.get('fileName', 'Unknown')
@@ -383,14 +442,28 @@ def render_album_tile(media_file, current_user):
         with st.container(height=200, border=False):
             if comments:
                 for comment in comments:
+                    original_text = comment.get('text', '')
+                    user_name = comment.get('user', 'anonymous')
+                    saved_translations = comment.get('translations', {})
+
+                    if selected_lang_code == "Original":
+                        display_text = original_text
+                    elif selected_lang_code in saved_translations:
+                        display_text = saved_translations[selected_lang_code]
+                    else:
+                        display_text = original_text 
+
                     with st.chat_message("user"):
-                        st.write(f"**{comment.get('user', 'anon')}**: {comment.get('text', '')}")
+                        st.write(f"**{user_name}**: {display_text}")
+                        
+                        if selected_lang_code != "Original" and display_text != original_text:
+                            st.caption(f"(Original) {original_text}")
             else:
                 st.caption("No comments.")
 
 
-def render_album_section(columns, current_user):
-    st.header("Album")
+def render_album_section(columns, current_user, target_language_code):
+    st.header("Explore")
 
     if 'edit_id' not in st.session_state:
         st.session_state.edit_id = None
@@ -419,6 +492,27 @@ def render_album_section(columns, current_user):
     if st.session_state.album_data is not None:
         data = st.session_state.album_data
 
+        if target_language_code != "Original":
+            missing_translations = []
+            
+            for file in data:
+                is_private = file.get('isPrivate', False)
+                owner_id = file.get('userID')
+                if not is_private or (is_private and owner_id == current_user['id']):
+                    
+                    for comment in file.get('comments', []):
+                        if target_language_code not in comment.get('translations', {}):
+                            missing_translations.append({
+                                'doc_id': file['id'],
+                                'ts': comment['timestamp'],
+                                'id': comment.get('id')
+                            })
+            
+            if missing_translations:
+                sent_new_work = handle_batch_translation(missing_translations, UIA, target_language_code)                
+                if sent_new_work:
+                    st.toast(f"Translating...")
+
         visible_files = []
         for file in data:
             owner_id = file.get('userID')
@@ -435,7 +529,7 @@ def render_album_section(columns, current_user):
             album_columns = st.columns(columns)
             for index, media_file in enumerate(visible_files):
                 with album_columns[index % columns]:
-                    render_album_tile(media_file, current_user)
+                    render_album_tile(media_file, current_user, target_language_code)
 
 if __name__ == "__main__":
     st.set_page_config(page_title="Snippet", layout="wide")
@@ -447,6 +541,6 @@ if __name__ == "__main__":
         current_user = st.session_state.user
         st.title("Snippet")
         
-        render_upload_section(current_user)
-        render_album_section(3, current_user)
+        selected_language = render_upload_section(current_user)
+        render_album_section(3, current_user, selected_language)
 
