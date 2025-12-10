@@ -102,7 +102,7 @@ def create_secure_temporary_link(file_name):
     
     return f"https://{account_name}.blob.core.windows.net/{CONTAINER}/{file_name}?{sas_token}"
 
-def upload_media(iups, file_object, user_file_name, user_name, user_id):
+def upload_media(iups, file_object, user_file_name, user_name, user_id, is_private):
     file_extension = os.path.splitext(file_object.name)[1]
 
     file = {'File': (file_object.name, file_object, file_object.type)}
@@ -110,7 +110,8 @@ def upload_media(iups, file_object, user_file_name, user_name, user_id):
         'fileName': user_file_name,
         'fileExtension': file_extension,
         'userName': user_name,
-        'userID': user_id
+        'userID': user_id,
+        'isPrivate': str(is_private).lower()
     }
 
     response = requests.post(iups, files=file, data=data)
@@ -118,8 +119,10 @@ def upload_media(iups, file_object, user_file_name, user_name, user_id):
     return response.status_code
 
 @st.cache_data(ttl=60)
-def display_media(rai):
-    response = requests.get(rai)
+def display_media(rai, requesting_user_id):
+    separator = "&" if "?" in rai else "?"        
+    secure_url = f"{rai}{separator}userID={quote(requesting_user_id)}"
+    response = requests.get(secure_url)
     data = response.json()
 
     return response.status_code, data
@@ -130,10 +133,11 @@ def format_url(url, item_id):
 
     return target_url
 
-def update_media(uia, document_id, media_file, user_file_name):
+def update_media(uia, document_id, media_file, user_file_name, is_private):
     data = media_file.copy()
 
     data['fileName'] = user_file_name
+    data['isPrivate'] = is_private
 
     system_keys = [k for k in data.keys() if k.startswith('_')]
     for k in system_keys:
@@ -165,13 +169,15 @@ def render_upload_section(current_user):
             user_file_name = st.text_input("File Name", "")
             uploaded_file = st.file_uploader("Select File")
 
+            is_private = st.toggle("Private", value=True)
+
             if st.form_submit_button("Upload"):
                 if uploaded_file:
                     with st.spinner("Uploading..."):
                         user_name = current_user['email']
                         user_id = current_user['id']
 
-                        status = upload_media(IUPS, uploaded_file, user_file_name, user_name, user_id)
+                        status = upload_media(IUPS, uploaded_file, user_file_name, user_name, user_id, is_private)
                         if status == 202: st.success("Upload Started...")
                         else: st.error(f"Error: {status}")
 
@@ -186,15 +192,17 @@ def handle_delete(dia, document_id):
     else:
         st.toast(f"Failed: {response}")
 
-def handle_update(uia, document_id, media_file, input_key):
-    new_user_file_name = st.session_state.get(input_key)
+def handle_update(uia, document_id, media_file, name_key, privacy_key):
+    new_user_file_name = st.session_state.get(name_key)
+    new_privacy_status = st.session_state.get(privacy_key)
 
     if new_user_file_name:
-        response = update_media(uia, document_id, media_file, new_user_file_name)
+        response = update_media(uia, document_id, media_file, new_user_file_name, new_privacy_status)
         if response == 200:
             for item in st.session_state.album_data:
                 if item['id'] == document_id:
                     item['fileName'] = new_user_file_name
+                    item['isPrivate'] = new_privacy_status
                     break
             
             st.session_state.edit_id = None
@@ -213,7 +221,10 @@ def render_album_tile(media_file, current_user):
 
     secure_url = create_secure_temporary_link(stored_file_name)
     
-    st.markdown(f"**{user_file_name}**")
+
+    is_private = media_file.get('isPrivate', False)
+    privacy_icon = "🔴 " if is_private else ""
+    st.markdown(f"**{privacy_icon}{user_file_name}**")
     st.caption(f"Uploaded by: {file_owner_name}")
     
     if secure_url:
@@ -231,13 +242,17 @@ def render_album_tile(media_file, current_user):
                 st.caption("Editing")
 
                 with st.form(f"edit_{document_id}"):
-                    input_key = f"input_filename_{document_id}"
-                    st.text_input("New Filename", value=user_file_name, key=input_key)
+                    input_key_filename = f"input_filename_{document_id}"
+                    input_key_privacy = f"input_privacy_{document_id}"
+
+                    st.text_input("New Filename", value=user_file_name, key=input_key_filename)
+
+                    st.toggle("Private", value=is_private, key=input_key_privacy)
                     
                     st.form_submit_button(
                         "Save Changes", 
                         on_click=handle_update, 
-                        args=(UIA, document_id, media_file, input_key)
+                        args=(UIA, document_id, media_file, input_key_filename, input_key_privacy)
                     )
 
                 column_delete, column_cancel = st.columns(2)
@@ -273,7 +288,7 @@ def render_album_section(columns, current_user):
 
     if st.session_state.album_data is None:
         with st.spinner("Refreshing..."):
-            status, data = display_media(RAI)
+            status, data = display_media(RAI, current_user['id'])
             if status == 200: 
                 st.session_state.album_data = data
             else: 
@@ -291,14 +306,22 @@ def render_album_section(columns, current_user):
 
     if st.session_state.album_data is not None:
         data = st.session_state.album_data
+
+        visible_files = []
+        for file in data:
+            owner_id = file.get('userID')
+            is_private = file.get('isPrivate', False)
+            
+            if not is_private or (is_private and owner_id == current_user['id']):
+                visible_files.append(file)
         
-        if not data:
+        if not visible_files:
             st.info("No media found.")
             return
 
         with album_container:
             album_columns = st.columns(columns)
-            for index, media_file in enumerate(data):
+            for index, media_file in enumerate(visible_files):
                 with album_columns[index % columns]:
                     render_album_tile(media_file, current_user)
 

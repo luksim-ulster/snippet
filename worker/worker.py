@@ -21,13 +21,17 @@ def process_upload(job_data):
         database = client.get_database_client(DATABASE_NAME)
         container = database.get_container_client(CONTAINER_NAME)
 
+        is_private = job_data.get('isPrivate', 'false')
+        is_private_bool = str(is_private).lower() == 'true'
+
         new_document = {
             "id": job_data['id'],
             "fileName": job_data['fileName'],
             "uniqueFileName": job_data['blobName'],
             "userName": job_data['userName'],
             "userID": job_data['userID'],
-            "filePath": f"/mediastorage/{job_data['blobName']}"
+            "filePath": f"/mediastorage/{job_data['blobName']}",
+            "isPrivate": is_private_bool
         }
 
         container.upsert_item(new_document)
