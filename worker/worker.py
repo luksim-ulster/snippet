@@ -20,7 +20,6 @@ TRANSLATOR_KEY = os.getenv('AZURE_TRANSLATOR_KEY')
 TRANSLATOR_REGION = os.getenv('AZURE_TRANSLATOR_REGION')
 TRANSLATOR_ENDPOINT = "https://api.cognitive.microsofttranslator.com"
 
-# new demo feature code
 
 def process_upload(job_data):
     try:
