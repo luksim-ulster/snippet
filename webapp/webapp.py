@@ -17,7 +17,7 @@ CONNECTION = os.getenv('AZURE_CONNECTION_STRING')
 CONTAINER = "mediastorage" 
 FIREBASE_API_KEY = os.getenv('FIREBASE_API_KEY')
 
-# new feature code
+# new demo feature code
 
 def firebase_login(email, password):
     url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={FIREBASE_API_KEY}"
