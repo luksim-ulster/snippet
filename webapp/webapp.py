@@ -9,10 +9,10 @@ import uuid
 
 load_dotenv()
 
-IUPS = os.getenv('IUPS', '')  # POST
-RAI  = os.getenv('RAI', '')   # GET
-UIA = os.getenv('UIA', '')   # UPDATE
-DIA = os.getenv('DIA', '')   # DELETE
+CREATE = os.getenv('CREATE', '')  # POST
+READ  = os.getenv('READ', '')   # GET
+UPDATE = os.getenv('UPDATE', '')   # PUT
+DELETE = os.getenv('DELETE', '')   # DELETE
 CONNECTION = os.getenv('AZURE_CONNECTION_STRING')
 CONTAINER = "mediastorage" 
 FIREBASE_API_KEY = os.getenv('FIREBASE_API_KEY')
@@ -105,7 +105,7 @@ def create_secure_temporary_link(file_name):
     
     return f"https://{account_name}.blob.core.windows.net/{CONTAINER}/{file_name}?{sas_token}"
 
-def upload_media(iups, file_object, user_file_name, user_name, user_id, is_private):
+def upload_media(create_url, file_object, user_file_name, user_name, user_id, is_private):
     file_extension = os.path.splitext(file_object.name)[1]
 
     file = {'File': (file_object.name, file_object, file_object.type)}
@@ -117,14 +117,14 @@ def upload_media(iups, file_object, user_file_name, user_name, user_id, is_priva
         'isPrivate': str(is_private).lower()
     }
 
-    response = requests.post(iups, files=file, data=data)
+    response = requests.post(create_url, files=file, data=data)
     
     return response.status_code
 
 @st.cache_data(ttl=60)
-def display_media(rai, requesting_user_id):
-    separator = "&" if "?" in rai else "?"        
-    secure_url = f"{rai}{separator}userID={quote(requesting_user_id)}"
+def display_media(read_url, requesting_user_id):
+    separator = "&" if "?" in read_url else "?"        
+    secure_url = f"{read_url}{separator}userID={quote(requesting_user_id)}"
     response = requests.get(secure_url)
     data = response.json()
 
@@ -136,7 +136,7 @@ def format_url(url, item_id):
 
     return target_url
 
-def update_media_metadata(uia, document_id, media_file, user_file_name, is_private):
+def update_media_metadata(update_url, document_id, media_file, user_file_name, is_private):
     data = media_file.copy()
 
     data['fileName'] = user_file_name
@@ -146,13 +146,13 @@ def update_media_metadata(uia, document_id, media_file, user_file_name, is_priva
     for k in system_keys:
         data.pop(k)
     
-    target_url = format_url(uia, document_id)
+    target_url = format_url(update_url, document_id)
     try:
         response = requests.put(target_url, json=data)
         return response.status_code
     except Exception as e: return str(e)
 
-def update_media_likes(uia, document_id, media_file, new_likes_count):
+def update_media_likes(update_url, document_id, media_file, new_likes_count):
     data = media_file.copy()
 
     data['likes'] = new_likes_count
@@ -161,13 +161,13 @@ def update_media_likes(uia, document_id, media_file, new_likes_count):
     for k in system_keys:
         data.pop(k)
     
-    target_url = format_url(uia, document_id)
+    target_url = format_url(update_url, document_id)
     try:
         response = requests.put(target_url, json=data)
         return response.status_code
     except Exception as e: return str(e)
 
-def update_media_comments(uia, document_id, media_file, new_comment):
+def update_media_comments(update_url, document_id, media_file, new_comment):
     data = media_file.copy()
 
     current_comments = data.get('comments', [])
@@ -179,14 +179,14 @@ def update_media_comments(uia, document_id, media_file, new_comment):
     for k in system_keys:
         data.pop(k)
     
-    target_url = format_url(uia, document_id)
+    target_url = format_url(update_url, document_id)
     try:
         response = requests.put(target_url, json=data)
         return response.status_code
     except Exception as e: return str(e)
 
-def delete_media(dia, item_id):
-    target_url = format_url(dia, item_id)
+def delete_media(delete_url, item_id):
+    target_url = format_url(delete_url, item_id)
     try:
         response = requests.delete(target_url)
         return response.status_code
@@ -225,7 +225,7 @@ def render_upload_section(current_user):
                         user_name = current_user['email']
                         user_id = current_user['id']
 
-                        status = upload_media(IUPS, uploaded_file, user_file_name, user_name, user_id, is_private)
+                        status = upload_media(CREATE, uploaded_file, user_file_name, user_name, user_id, is_private)
                         if status == 202: st.success("Upload Started...")
                         else: st.error(f"Error: {status}")
         
@@ -233,8 +233,8 @@ def render_upload_section(current_user):
 
         return target_language_code
 
-def handle_delete(dia, document_id):
-    response = delete_media(dia, document_id)
+def handle_delete(delete_url, document_id):
+    response = delete_media(delete_url, document_id)
     if response == 200:
         st.session_state.album_data = [
             item for item in st.session_state.album_data 
@@ -244,12 +244,12 @@ def handle_delete(dia, document_id):
     else:
         st.toast(f"Failed: {response}")
 
-def handle_update_metadata(uia, document_id, media_file, name_key, privacy_key):
+def handle_update_metadata(update_url, document_id, media_file, name_key, privacy_key):
     new_user_file_name = st.session_state.get(name_key)
     new_privacy_status = st.session_state.get(privacy_key)
 
     if new_user_file_name:
-        response = update_media_metadata(uia, document_id, media_file, new_user_file_name, new_privacy_status)
+        response = update_media_metadata(update_url, document_id, media_file, new_user_file_name, new_privacy_status)
         if response == 200:
             for item in st.session_state.album_data:
                 if item['id'] == document_id:
@@ -262,11 +262,11 @@ def handle_update_metadata(uia, document_id, media_file, name_key, privacy_key):
         else:
             st.toast(f"Failed: {response}")
 
-def handle_update_likes(uia, document_id, media_file):
+def handle_update_likes(update_url, document_id, media_file):
     current_likes = media_file.get('likes', 0)
     new_likes = current_likes + 1
 
-    response = update_media_likes(uia, document_id, media_file, new_likes)
+    response = update_media_likes(update_url, document_id, media_file, new_likes)
     
     if response == 200:
         for item in st.session_state.album_data:
@@ -277,7 +277,7 @@ def handle_update_likes(uia, document_id, media_file):
     else:
         st.toast(f"Failed: {response}")
 
-def handle_update_comments(uia, document_id, media_file, input_key, current_user_email):
+def handle_update_comments(update_url, document_id, media_file, input_key, current_user_email):
     comment_text = st.session_state.get(input_key)
 
     if comment_text:
@@ -291,7 +291,7 @@ def handle_update_comments(uia, document_id, media_file, input_key, current_user
             "translations": {}
         }
 
-        response = update_media_comments(uia, document_id, media_file, new_comment)
+        response = update_media_comments(update_url, document_id, media_file, new_comment)
         
         if response == 200:
             for item in st.session_state.album_data:
@@ -306,7 +306,7 @@ def handle_update_comments(uia, document_id, media_file, input_key, current_user
         else:
             st.toast(f"Failed: {response}")
 
-def send_translation_request(uia, doc_id, comment_timestamp, target_lang, comment_id=None):
+def send_translation_request(update_url, doc_id, comment_timestamp, target_lang, comment_id=None):
     payload = {
         "task": "translate_comment",
         "docID": doc_id,
@@ -314,7 +314,7 @@ def send_translation_request(uia, doc_id, comment_timestamp, target_lang, commen
         "commentID": comment_id,
         "targetLang": target_lang
     }
-    target_url = format_url(uia, "translation_request")
+    target_url = format_url(update_url, "translation_request")
     
     try:
         requests.put(target_url, json=payload)
@@ -322,7 +322,7 @@ def send_translation_request(uia, doc_id, comment_timestamp, target_lang, commen
     except Exception:
         return False
 
-def handle_batch_translation(missing_items, uia_url, target_lang):
+def handle_batch_translation(missing_items, update_url, target_lang):
     if 'requested_ids' not in st.session_state:
         st.session_state.requested_ids = set()
     
@@ -340,7 +340,7 @@ def handle_batch_translation(missing_items, uia_url, target_lang):
         
     for new_request in new_requests:
         comment_id = new_request.get('id')
-        send_translation_request(uia_url, new_request['doc_id'], new_request['ts'], target_lang, comment_id=comment_id)
+        send_translation_request(update_url, new_request['doc_id'], new_request['ts'], target_lang, comment_id=comment_id)
     
     return True
 
@@ -387,7 +387,7 @@ def render_album_tile(media_file, current_user, selected_lang_code):
                             "Save Changes",
                             use_container_width=True,
                             on_click=handle_update_metadata, 
-                            args=(UIA, document_id, media_file, input_key_filename, input_key_privacy)
+                            args=(UPDATE, document_id, media_file, input_key_filename, input_key_privacy)
                         )
 
                     column_delete, column_cancel = st.columns(2)
@@ -399,7 +399,7 @@ def render_album_tile(media_file, current_user, selected_lang_code):
                             type="primary", 
                             use_container_width=True,
                             on_click=handle_delete, 
-                            args=(DIA, document_id)
+                            args=(DELETE, document_id)
                         )
                     
                     with column_cancel:
@@ -426,7 +426,7 @@ def render_album_tile(media_file, current_user, selected_lang_code):
                 key=f"like_{document_id}", 
                 on_click=handle_update_likes,
                 use_container_width=True,
-                args=(UIA, document_id, media_file)
+                args=(UPDATE, document_id, media_file)
             )
 
         with st.form(key=f"comment_form_{document_id}", clear_on_submit=True):
@@ -438,7 +438,7 @@ def render_album_tile(media_file, current_user, selected_lang_code):
                 "Post",
                 use_container_width=True,
                 on_click=handle_update_comments,
-                args=(UIA, document_id, media_file, input_key, current_user['email'])
+                args=(UPDATE, document_id, media_file, input_key, current_user['email'])
             )
 
         with st.container(height=200, border=False):
@@ -475,7 +475,7 @@ def render_album_section(columns, current_user, target_language_code):
 
     if st.session_state.album_data is None:
         with st.spinner("Refreshing..."):
-            status, data = display_media(RAI, current_user['id'])
+            status, data = display_media(READ, current_user['id'])
             if status == 200: 
                 st.session_state.album_data = data
             else: 
@@ -511,7 +511,7 @@ def render_album_section(columns, current_user, target_language_code):
                             })
             
             if missing_translations:
-                sent_new_work = handle_batch_translation(missing_translations, UIA, target_language_code)                
+                sent_new_work = handle_batch_translation(missing_translations, UPDATE, target_language_code)                
                 if sent_new_work:
                     st.toast(f"Translating...")
 
